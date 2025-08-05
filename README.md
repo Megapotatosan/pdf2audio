@@ -1,19 +1,21 @@
-# 📄➡️🔊 PDF to Audio Converter (OpenAI TTS)
+# 📄➡️🔊 PDF to Audio Converter (OpenAI TTS + MinerU)
 
-A Python application that converts PDF documents to high-quality audio using OpenAI's TTS-1-HD text-to-speech API, with a user-friendly Gradio interface. Supports multiple voices and long documents.
+A Python application that converts PDF documents to high-quality audio using OpenAI's TTS-1-HD text-to-speech API, with advanced PDF parsing powered by MinerU. Features a user-friendly Gradio interface and supports multiple voices and long documents.
 
 ---
 
 ## 🌟 Features
 
-- **OpenAI TTS Integration**: Uses OpenAI's TTS-1-HD model for premium, natural-sounding speech
-- **Multiple Voices**: Choose from 6 different voice options (Alloy, Echo, Fable, Onyx, Nova, Shimmer)
-- **Smart PDF Text Extraction**: Advanced text parsing that filters out headers, footers, and page numbers
-- **Web Interface**: Clean and intuitive Gradio-based GUI
-- **Audio Download**: Generated audio files can be downloaded as WAV files
-- **Text Preview**: View extracted and cleaned text before conversion
-- **Long Document Support**: Handles large PDFs with intelligent text chunking
-- **Content-Focused Processing**: Removes repetitive elements and focuses on main document content
+- **🚀 MinerU Integration**: Uses advanced MinerU API for superior PDF parsing, handling complex layouts, scientific documents, and maintaining document structure
+- **🎯 OpenAI TTS Integration**: Uses OpenAI's TTS-1-HD model for premium, natural-sounding speech
+- **🎭 Multiple Voices**: Choose from 6 different voice options (Alloy, Echo, Fable, Onyx, Nova, Shimmer)
+- **🧠 Smart PDF Text Extraction**: Advanced parsing that removes headers, footers, page numbers, and preserves reading order
+- **📱 Web Interface**: Clean and intuitive Gradio-based GUI
+- **💾 Audio Download**: Generated audio files can be downloaded as WAV files
+- **👀 Text Preview**: View extracted and cleaned text before conversion
+- **📚 Long Document Support**: Handles large PDFs with intelligent text chunking
+- **🔄 Fallback System**: Automatic fallback to PyMuPDF if MinerU API is unavailable
+- **🔬 Scientific Document Support**: Excellent handling of academic papers, research documents, and complex layouts
 
 ---
 
@@ -27,7 +29,7 @@ A Python application that converts PDF documents to high-quality audio using Ope
 **Python Packages:**
 - gradio
 - openai
-- PyPDF2
+- PyMuPDF
 - soundfile
 - numpy
 - requests

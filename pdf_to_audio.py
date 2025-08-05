@@ -1,5 +1,4 @@
 import gradio as gr
-import PyPDF2
 import soundfile as sf
 import numpy as np
 import tempfile
@@ -8,6 +7,7 @@ from typing import Optional, Tuple
 import openai
 import requests
 from pathlib import Path
+import json
 
 class PDFToAudioConverter:
     def __init__(self):
@@ -42,37 +42,207 @@ class PDFToAudioConverter:
         except Exception as e:
             return f"❌ Error setting API key: {str(e)}"
     
-    def extract_text_from_pdf(self, pdf_file) -> str:
-        """Extract text content from uploaded PDF file with improved parsing."""
+    def extract_text_from_pdf_mineru(self, pdf_file) -> str:
+        """Extract text content from uploaded PDF file using MinerU API."""
         try:
             if pdf_file is None:
                 return "No PDF file provided."
             
-            # Read PDF file
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            print("🔄 Using MinerU API for advanced PDF parsing...")
+            
+            # Prepare the file for upload to MinerU API
+            with open(pdf_file, 'rb') as f:
+                files = {
+                    'files': (os.path.basename(pdf_file), f, 'application/pdf'),
+                }
+
+                data = {
+                    'return_middle_json': 'false',
+                    'return_model_output': 'false',
+                    'return_md': 'true',
+                    'return_images': 'false',
+                    'end_page_id': '99999',
+                    'parse_method': 'auto',
+                    'start_page_id': '0',
+                    'lang_list': 'ch',
+                    'output_dir': '',
+                    'server_url': 'string',
+                    'return_content_list': 'false',
+                    'backend': 'pipeline',
+                    'table_enable': 'true',
+                    'formula_enable': 'true',
+                }
+
+                
+                headers = {
+                    'accept': 'application/json'
+                }
+                # Make request to MinerU API
+                response = requests.post(
+                    #url of MinerU API endpoint
+                    "http://localhost:8000/file_parse",
+                    headers=headers,
+                    data=data,
+                    files=files
+                    #timeout=120  # 2 minutes timeout for large files
+                )
+            
+            if response.status_code != 200:
+                print(f"❌ MinerU API error: {response.status_code}")
+                # Fallback to basic extraction if MinerU fails
+                return self.extract_text_from_pdf_fallback(pdf_file)
+            
+            # Parse the response
+            try:
+                result = response.json()
+                
+                # Extract text from MinerU response
+                if 'markdown' in result:
+                    # MinerU returns markdown format
+                    markdown_text = result['markdown']
+                    # Convert markdown to plain text for TTS
+                    cleaned_text = self.clean_markdown_text(markdown_text)
+                elif 'text' in result:
+                    # Direct text response
+                    cleaned_text = result['text']
+                else:
+                    # Try to extract from any text field in the response
+                    cleaned_text = str(result)
+                
+                if not cleaned_text or not cleaned_text.strip():
+                    print("⚠️ MinerU returned empty text, falling back to basic extraction")
+                    return self.extract_text_from_pdf_fallback(pdf_file)
+                
+                print(f"✅ MinerU PDF extraction completed successfully! Extracted {len(cleaned_text)} characters with advanced parsing.")
+                return cleaned_text.strip()
+                
+            except json.JSONDecodeError:
+                # If response is not JSON, treat as plain text
+                cleaned_text = response.text
+                if cleaned_text and cleaned_text.strip():
+                    print(f"✅ MinerU PDF extraction completed! Extracted {len(cleaned_text)} characters.")
+                    return cleaned_text.strip()
+                else:
+                    print("⚠️ MinerU returned empty response, falling back to basic extraction")
+                    return self.extract_text_from_pdf_fallback(pdf_file)
+                    
+        except requests.exceptions.Timeout:
+            print("⚠️ MinerU API timeout, falling back to basic extraction")
+            return self.extract_text_from_pdf_fallback(pdf_file)
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ MinerU API connection error: {str(e)}, falling back to basic extraction")
+            return self.extract_text_from_pdf_fallback(pdf_file)
+        except Exception as e:
+            print(f"⚠️ MinerU processing error: {str(e)}, falling back to basic extraction")
+            return self.extract_text_from_pdf_fallback(pdf_file)
+
+    def extract_text_from_pdf_fallback(self, pdf_file) -> str:
+        """Fallback PDF extraction method using basic text extraction."""
+        try:
+            print("🔄 Using fallback PDF extraction method...")
+            
+            # Simple text extraction without PyPDF2 dependency
+            import fitz  # PyMuPDF - more reliable than PyPDF2
+            
+            doc = fitz.open(pdf_file)
             all_pages_text = []
             
-            # Extract text from all pages
-            for page_num in range(len(pdf_reader.pages)):
-                page = pdf_reader.pages[page_num]
-                page_text = page.extract_text()
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                page_text = page.get_text()
                 if page_text.strip():
                     all_pages_text.append(page_text)
+            
+            doc.close()
             
             if not all_pages_text:
                 return "No text found in the PDF file."
             
-            # Process and clean the extracted text
-            cleaned_text = self.clean_pdf_text(all_pages_text)
+            # Basic text cleaning
+            full_text = "\n".join(all_pages_text)
+            cleaned_text = self.basic_text_cleaning(full_text)
             
             if not cleaned_text.strip():
                 return "No meaningful text found after processing."
             
-            print(f"✅ PDF text extraction completed successfully! Extracted {len(cleaned_text)} characters from {len(pdf_reader.pages)} pages.")
+            print(f"✅ Fallback PDF extraction completed! Extracted {len(cleaned_text)} characters from {len(all_pages_text)} pages.")
             return cleaned_text.strip()
             
+        except ImportError:
+            return "PDF extraction failed. Please install PyMuPDF: pip install PyMuPDF"
         except Exception as e:
             return f"Error extracting text from PDF: {str(e)}"
+
+    def clean_markdown_text(self, markdown_text: str) -> str:
+        """Convert markdown text to clean plain text suitable for TTS."""
+        import re
+        
+        if not markdown_text:
+            return ""
+        
+        # Remove markdown formatting
+        text = markdown_text
+        
+        # Remove headers (# ## ###)
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        
+        # Remove bold and italic markers
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # **bold**
+        text = re.sub(r'\*(.*?)\*', r'\1', text)      # *italic*
+        text = re.sub(r'__(.*?)__', r'\1', text)      # __bold__
+        text = re.sub(r'_(.*?)_', r'\1', text)        # _italic_
+        
+        # Remove links but keep text
+        text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # [text](url)
+        text = re.sub(r'<([^>]+)>', r'\1', text)               # <url>
+        
+        # Remove code blocks and inline code
+        text = re.sub(r'```[^`]*```', '', text, flags=re.DOTALL)  # ```code```
+        text = re.sub(r'`([^`]+)`', r'\1', text)                  # `code`
+        
+        # Remove list markers
+        text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)  # - * +
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE) # 1. 2. 3.
+        
+        # Remove horizontal rules
+        text = re.sub(r'^-{3,}$', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\*{3,}$', '', text, flags=re.MULTILINE)
+        
+        # Remove blockquotes
+        text = re.sub(r'^>\s*', '', text, flags=re.MULTILINE)
+        
+        # Clean up whitespace
+        text = re.sub(r'\n\s*\n', '\n\n', text)  # Multiple newlines to double
+        text = re.sub(r'\n{3,}', '\n\n', text)   # More than 2 newlines to 2
+        text = re.sub(r'[ \t]+', ' ', text)      # Multiple spaces to single
+        
+        # Convert newlines to spaces for better TTS flow
+        text = text.replace('\n', ' ')
+        text = re.sub(r'\s+', ' ', text)
+        
+        return text.strip()
+
+    def basic_text_cleaning(self, text: str) -> str:
+        """Basic text cleaning for fallback extraction."""
+        import re
+        
+        if not text:
+            return ""
+        
+        # Remove excessive whitespace
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Remove common PDF artifacts
+        text = re.sub(r'[^\w\s\.\,\!\?\;\:\-\(\)\'\"]', ' ', text)
+        
+        # Clean up extra spaces
+        text = " ".join(text.split())
+        
+        return text.strip()
+
+    def extract_text_from_pdf(self, pdf_file) -> str:
+        """Main PDF extraction method - tries MinerU first, falls back if needed."""
+        return self.extract_text_from_pdf_mineru(pdf_file)
     
     def clean_pdf_text(self, pages_text: list) -> str:
         """Clean PDF text by removing headers, footers, and improving readability."""
@@ -356,17 +526,19 @@ def create_gradio_interface():
     with gr.Blocks(title="PDF to Audio Converter - OpenAI TTS", theme=gr.themes.Soft()) as interface:
         gr.Markdown(
             """
-            # 📄➡️🔊 PDF to Audio Converter (OpenAI TTS)
+            # 📄➡️🔊 PDF to Audio Converter (OpenAI TTS + MinerU)
             
-            Upload a PDF file and convert its text content to speech using OpenAI's state-of-the-art TTS API.
+            Upload a PDF file and convert its text content to speech using OpenAI's state-of-the-art TTS API with advanced MinerU PDF parsing.
             
             **Features:**
+            - 🚀 **MinerU Integration**: Advanced PDF parsing for complex layouts, scientific documents, and better text extraction
             - 🎯 **Premium Quality**: Uses OpenAI's TTS-1-HD model for superior audio quality
-            - 📖 **PDF Text Extraction**: Automatically extracts text from uploaded PDF files
+            - 📖 **Smart PDF Extraction**: Automatically extracts text with structure preservation and header/footer removal
             - 🎭 **Multiple Voices**: Choose from 6 different voice options
             - 📚 **Long Document Support**: Processes entire PDF chapters with intelligent chunking
             - 💾 **Download Audio**: Generated audio files can be downloaded as WAV files
             - 👀 **Text Preview**: View extracted text before conversion
+            - 🔄 **Fallback System**: Automatic fallback if MinerU API is unavailable
             """
         )
         
