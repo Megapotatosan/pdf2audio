@@ -43,27 +43,114 @@ class PDFToAudioConverter:
             return f"❌ Error setting API key: {str(e)}"
     
     def extract_text_from_pdf(self, pdf_file) -> str:
-        """Extract text content from uploaded PDF file."""
+        """Extract text content from uploaded PDF file with improved parsing."""
         try:
             if pdf_file is None:
                 return "No PDF file provided."
             
             # Read PDF file
             pdf_reader = PyPDF2.PdfReader(pdf_file)
-            text_content = ""
+            all_pages_text = []
             
             # Extract text from all pages
             for page_num in range(len(pdf_reader.pages)):
                 page = pdf_reader.pages[page_num]
-                text_content += page.extract_text() + "\n"
+                page_text = page.extract_text()
+                if page_text.strip():
+                    all_pages_text.append(page_text)
             
-            if not text_content.strip():
+            if not all_pages_text:
                 return "No text found in the PDF file."
             
-            return text_content.strip()
+            # Process and clean the extracted text
+            cleaned_text = self.clean_pdf_text(all_pages_text)
+            
+            if not cleaned_text.strip():
+                return "No meaningful text found after processing."
+            
+            print(f"✅ PDF text extraction completed successfully! Extracted {len(cleaned_text)} characters from {len(pdf_reader.pages)} pages.")
+            return cleaned_text.strip()
             
         except Exception as e:
             return f"Error extracting text from PDF: {str(e)}"
+    
+    def clean_pdf_text(self, pages_text: list) -> str:
+        """Clean PDF text by removing headers, footers, and improving readability."""
+        import re
+        
+        if not pages_text:
+            return ""
+        
+        # Combine all pages
+        full_text = "\n".join(pages_text)
+        
+        # Split into lines for processing
+        lines = full_text.split('\n')
+        cleaned_lines = []
+        
+        # Remove empty lines and very short lines that might be artifacts
+        lines = [line.strip() for line in lines if line.strip() and len(line.strip()) > 2]
+        
+        if not lines:
+            return ""
+        
+        # Detect and remove potential headers/footers
+        # Headers/footers often repeat across pages or contain page numbers
+        line_frequency = {}
+        for line in lines:
+            # Normalize line for comparison (remove numbers that might be page numbers)
+            normalized = re.sub(r'\b\d+\b', '', line).strip()
+            if len(normalized) > 5:  # Only consider substantial lines
+                line_frequency[normalized] = line_frequency.get(normalized, 0) + 1
+        
+        # Lines that appear frequently might be headers/footers
+        total_pages = len(pages_text)
+        frequent_lines = set()
+        for normalized_line, count in line_frequency.items():
+            # If a line appears in more than 30% of pages, it might be header/footer
+            if count > max(2, total_pages * 0.3):
+                frequent_lines.add(normalized_line)
+        
+        # Filter out likely headers/footers and page numbers
+        for line in lines:
+            # Skip lines that are likely page numbers
+            if re.match(r'^\s*\d+\s*$', line):
+                continue
+            
+            # Skip lines that are very short and contain mostly numbers/symbols
+            if len(line) < 10 and re.match(r'^[\d\s\-\.\|]+$', line):
+                continue
+            
+            # Check if this line is a frequent header/footer
+            normalized = re.sub(r'\b\d+\b', '', line).strip()
+            if normalized in frequent_lines and len(normalized) < 50:
+                continue
+            
+            # Skip lines that look like URLs or email addresses (often in footers)
+            if re.search(r'(https?://|www\.|@.*\.com)', line, re.IGNORECASE):
+                continue
+            
+            # Skip copyright notices and similar footer content
+            if re.search(r'(copyright|©|\(c\)|all rights reserved)', line, re.IGNORECASE):
+                continue
+            
+            cleaned_lines.append(line)
+        
+        # Join cleaned lines and perform additional text processing
+        cleaned_text = ' '.join(cleaned_lines)
+        
+        # Remove excessive whitespace
+        cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
+        
+        # Fix common PDF extraction issues
+        # Remove hyphenation at line breaks
+        cleaned_text = re.sub(r'-\s+', '', cleaned_text)
+        
+        # Fix spacing around punctuation
+        cleaned_text = re.sub(r'\s+([,.!?;:])', r'\1', cleaned_text)
+        cleaned_text = re.sub(r'([.!?])\s*([A-Z])', r'\1 \2', cleaned_text)
+        
+        return cleaned_text.strip()
     
     def split_text_into_chunks(self, text: str, max_length: int = 4000) -> list:
         """Split long text into manageable chunks for OpenAI TTS processing."""
@@ -226,6 +313,7 @@ class PDFToAudioConverter:
             sf.write(temp_file.name, full_audio, samplerate=sample_rate)
             
             duration = len(full_audio) / sample_rate  # Calculate duration in seconds
+            print(f"🎵 Audio generation completed successfully! Generated {duration:.1f} seconds of audio from {len(text_chunks)} text chunks.")
             return temp_file.name, f"🎉 High-quality audio generated successfully using OpenAI TTS! Duration: {duration:.1f} seconds ({len(text_chunks)} chunks processed)"
             
         except Exception as e:
@@ -247,6 +335,10 @@ class PDFToAudioConverter:
             
             # Convert text to speech
             audio_file, status_message = self.text_to_speech(extracted_text, voice)
+            
+            if audio_file:
+                print("🎊 PDF to Audio conversion process completed successfully!")
+                print("=" * 60)
             
             return audio_file, extracted_text, status_message
             

@@ -8,11 +8,12 @@ A Python application that converts PDF documents to high-quality audio using Ope
 
 - **OpenAI TTS Integration**: Uses OpenAI's TTS-1-HD model for premium, natural-sounding speech
 - **Multiple Voices**: Choose from 6 different voice options (Alloy, Echo, Fable, Onyx, Nova, Shimmer)
-- **PDF Text Extraction**: Automatically extracts text from uploaded PDF files
+- **Smart PDF Text Extraction**: Advanced text parsing that filters out headers, footers, and page numbers
 - **Web Interface**: Clean and intuitive Gradio-based GUI
 - **Audio Download**: Generated audio files can be downloaded as WAV files
-- **Text Preview**: View extracted text before conversion
+- **Text Preview**: View extracted and cleaned text before conversion
 - **Long Document Support**: Handles large PDFs with intelligent text chunking
+- **Content-Focused Processing**: Removes repetitive elements and focuses on main document content
 
 ---
 
