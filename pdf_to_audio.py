@@ -96,18 +96,8 @@ class PDFToAudioConverter:
             try:
                 result = response.json()
                 
-                # Extract text from MinerU response
-                if 'markdown' in result:
-                    # MinerU returns markdown format
-                    markdown_text = result['markdown']
-                    # Convert markdown to plain text for TTS
-                    cleaned_text = self.clean_markdown_text(markdown_text)
-                elif 'text' in result:
-                    # Direct text response
-                    cleaned_text = result['text']
-                else:
-                    # Try to extract from any text field in the response
-                    cleaned_text = str(result)
+                # Extract text from MinerU response - handle nested structure
+                cleaned_text = self.extract_text_from_mineru_response(result)
                 
                 if not cleaned_text or not cleaned_text.strip():
                     print("⚠️ MinerU returned empty text, falling back to basic extraction")
@@ -135,6 +125,41 @@ class PDFToAudioConverter:
         except Exception as e:
             print(f"⚠️ MinerU processing error: {str(e)}, falling back to basic extraction")
             return self.extract_text_from_pdf_fallback(pdf_file)
+
+    def extract_text_from_mineru_response(self, result: dict) -> str:
+        """Extract and clean text from MinerU API response structure."""
+        try:
+            # Handle the nested structure: {'backend': ..., 'version': ..., 'results': {...}}
+            if 'results' in result and isinstance(result['results'], dict):
+                all_content = []
+                
+                # Iterate through all documents in results
+                for doc_title, doc_data in result['results'].items():
+                    if isinstance(doc_data, dict) and 'md_content' in doc_data:
+                        markdown_content = doc_data['md_content']
+                        if markdown_content:
+                            # Clean the markdown content for TTS
+                            cleaned_content = self.clean_mineru_markdown_text(markdown_content)
+                            if cleaned_content.strip():
+                                all_content.append(cleaned_content)
+                
+                return ' '.join(all_content)
+            
+            # Fallback: try direct md_content access
+            elif 'md_content' in result:
+                return self.clean_mineru_markdown_text(result['md_content'])
+            
+            # Fallback: try text field
+            elif 'text' in result:
+                return result['text']
+            
+            # Last resort: convert entire result to string
+            else:
+                return str(result)
+                
+        except Exception as e:
+            print(f"Error extracting text from MinerU response: {e}")
+            return ""
 
     def extract_text_from_pdf_fallback(self, pdf_file) -> str:
         """Fallback PDF extraction method using basic text extraction."""
@@ -221,6 +246,112 @@ class PDFToAudioConverter:
         text = re.sub(r'\s+', ' ', text)
         
         return text.strip()
+
+    def clean_mineru_markdown_text(self, markdown_text: str) -> str:
+        """Specialized cleaning for MinerU markdown content with enhanced TTS optimization."""
+        import re
+        
+        if not markdown_text:
+            return ""
+        
+        text = markdown_text
+        
+        # Remove image references completely (not useful for audio)
+        text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
+        
+        # Remove markdown headers but keep the text
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        
+        # Remove bold and italic markers but keep content
+        text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)  # **bold**
+        text = re.sub(r'\*(.*?)\*', r'\1', text)      # *italic*
+        text = re.sub(r'__(.*?)__', r'\1', text)      # __bold__
+        text = re.sub(r'_(.*?)_', r'\1', text)        # _italic_
+        
+        # Remove links but keep the text content
+        text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # [text](url)
+        text = re.sub(r'<([^>]+)>', '', text)  # Remove <url> completely
+        
+        # Remove code blocks and inline code
+        text = re.sub(r'```[^`]*```', '', text, flags=re.DOTALL)
+        text = re.sub(r'`([^`]+)`', r'\1', text)
+        
+        # Handle mathematical notation - convert to readable text
+        # LaTeX math expressions like $8 ^ { \mathrm { t h } }$
+        text = re.sub(r'\$([^$]+)\$', lambda m: self.convert_math_to_text(m.group(1)), text)
+        
+        # Remove list markers but keep content
+        text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+        
+        # Remove horizontal rules
+        text = re.sub(r'^[-*_]{3,}$', '', text, flags=re.MULTILINE)
+        
+        # Remove blockquotes markers but keep content
+        text = re.sub(r'^>\s*', '', text, flags=re.MULTILINE)
+        
+        # Clean up email addresses and URLs that might be in footers
+        text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '', text)
+        text = re.sub(r'https?://[^\s]+', '', text)
+        text = re.sub(r'www\.[^\s]+', '', text)
+        
+        # Remove common PDF artifacts and formatting
+        text = re.sub(r'\b(Page \d+|第\d+页|\d+/\d+)\b', '', text)  # Page numbers
+        text = re.sub(r'\b\d{4}年\d{1,2}月\d{1,2}日\b', '', text)  # Chinese dates
+        text = re.sub(r'\b\d{1,2}/\d{1,2}/\d{4}\b', '', text)      # English dates
+        
+        # Handle Chinese and English mixed content
+        # Add spaces between Chinese and English characters for better TTS
+        text = re.sub(r'([\u4e00-\u9fff])([A-Za-z])', r'\1 \2', text)
+        text = re.sub(r'([A-Za-z])([\u4e00-\u9fff])', r'\1 \2', text)
+        
+        # Clean up excessive whitespace
+        text = re.sub(r'\n\s*\n', '\n\n', text)  # Multiple newlines to double
+        text = re.sub(r'\n{3,}', '\n\n', text)   # More than 2 newlines to 2
+        text = re.sub(r'[ \t]+', ' ', text)      # Multiple spaces to single
+        
+        # Convert newlines to spaces for better TTS flow
+        text = text.replace('\n', ' ')
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Remove any remaining special characters that might cause TTS issues
+        text = re.sub(r'[^\w\s\u4e00-\u9fff\.\,\!\?\;\:\-\(\)\'\"]', ' ', text)
+        
+        # Final cleanup
+        text = " ".join(text.split())
+        
+        return text.strip()
+
+    def convert_math_to_text(self, math_expr: str) -> str:
+        """Convert LaTeX math expressions to readable text for TTS."""
+        import re
+        
+        # Handle common mathematical expressions
+        math_expr = math_expr.strip()
+        
+        # Handle ordinal numbers like "8 ^ { \mathrm { t h } }" or "8 ^ { \\mathrm { t h } }"
+        ordinal_pattern = r'(\d+)\s*\^\s*\{\s*\\*mathrm\s*\{\s*([a-z]+)\s*\}\s*\}'
+        ordinal_match = re.search(ordinal_pattern, math_expr)
+        if ordinal_match:
+            number = ordinal_match.group(1)
+            suffix = ordinal_match.group(2)
+            return f"{number}{suffix}"
+        
+        # Handle simple superscripts like "x^2"
+        math_expr = re.sub(r'(\w+)\^(\d+)', r'\1 to the power of \2', math_expr)
+        
+        # Handle fractions
+        math_expr = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'\1 over \2', math_expr)
+        
+        # Remove LaTeX commands and braces
+        math_expr = re.sub(r'\\[a-zA-Z]+\s*', '', math_expr)
+        math_expr = re.sub(r'[{}]', '', math_expr)
+        
+        # Clean up spaces and remaining symbols
+        math_expr = re.sub(r'\s*\^\s*', ' ', math_expr)  # Remove remaining ^ symbols
+        math_expr = " ".join(math_expr.split())
+        
+        return math_expr if math_expr else ""
 
     def basic_text_cleaning(self, text: str) -> str:
         """Basic text cleaning for fallback extraction."""
